@@ -3,10 +3,21 @@ name = "frameit"
 version = "0.1.0"
 edition = "2024"
 authors = ["eggfriedrice"]
-
+description = "Temporary selection rectangle overlay for Wayland and Hyprland that shows up in screen shares"
+license = "MIT"
+repository = "https://github.com/eggfriedrice24/frameit"
+readme = "README.md"
+keywords = ["wayland", "hyprland", "overlay", "screen-share", "layer-shell"]
+categories = ["command-line-utilities", "gui"]
+rust-version = "1.88"
+exclude = [".github/", "packaging/"]
 
 [dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
