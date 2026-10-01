@@ -13,7 +13,13 @@ such as sway and river.
 
 ## Install
 
-Requires a Rust toolchain.
+Arch Linux, from the AUR:
+
+```sh
+paru -S frameit
+```
+
+From source, with a Rust toolchain:
 
 ```sh
 cargo install --path .
