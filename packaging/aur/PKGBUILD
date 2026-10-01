@@ -11,7 +11,7 @@ depends=('glibc' 'libgcc')
 makedepends=('cargo')
 optdepends=('hyprland: register the trigger with frameit bind')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-b2sums=('SKIP')
+b2sums=('5effc94c8c1f41f3552a936005090ec45f570e625c9a03d781d621ada2b43a5993ff5a9899d584c842579946561d30fa481c437263647bb5934fb73612fde2ab')
 
 # Keep debug info in the binary so makepkg can split it into the -debug package.
 export CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_STRIP=false
