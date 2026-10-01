@@ -1,4 +1,6 @@
-# Publishes packaging/frameit to the AUR package "frameit".
+# Publishes packaging/frameit and packaging/frameit-bin to the AUR packages
+# "frameit" (built from the GitHub tag tarball) and "frameit-bin" (the
+# prebuilt frameit-<version>-x86_64-linux.tar.gz release asset).
 #
 # Required repository secret:
 #   AUR_SSH_PRIVATE_KEY  An SSH private key in OpenSSH format without a
@@ -15,18 +17,28 @@
 #     because a release created with GITHUB_TOKEN does not fire the release
 #     event for other workflows.
 #
-# What it does, in an archlinux:base-devel container:
-#   1. computes the BLAKE2 checksum of the GitHub tag tarball for the release,
-#   2. sets pkgver (tag without v), pkgrel=1 and b2sums in
-#      packaging/frameit/PKGBUILD and regenerates .SRCINFO,
-#   3. test builds the package with makepkg (checksums verified) and namcap,
-#   4. pushes PKGBUILD, .SRCINFO and the packaging LICENSE to
-#      ssh://aur@aur.archlinux.org/frameit.git with the commit
+# What it does, in an archlinux:base-devel container and in a single job, so
+# the packages are handled one after the other and master receives one commit:
+#   1. clones each AUR repository and compares its pkgver with the tag; a
+#      package that already carries the version is skipped,
+#   2. for each remaining package sets pkgver (tag without v) and pkgrel=1 in
+#      a copy of its PKGBUILD, runs updpkgsums and regenerates .SRCINFO, then
+#      checks the checksum against upstream: for frameit the BLAKE2 sum of a
+#      separate download of the tag tarball, for frameit-bin the SHA-256
+#      published in frameit-<version>-x86_64-linux.tar.gz.sha256 next to the
+#      release asset,
+#   3. test builds each package with makepkg (checksums verified) and namcap,
+#   4. pushes PKGBUILD, .SRCINFO and the packaging LICENSE of each package to
+#      ssh://aur@aur.archlinux.org/<pkgname>.git with the commit
 #      "upgpkg: <version>-1",
-#   5. commits the updated packaging/aur files back to master with
+#   5. commits the updated packaging/ files back to master in one commit with
 #      "[skip ci]" so the push does not start another CI run.
-# If the AUR repository already carries that pkgver, the job logs it and
-# exits successfully without changing anything.
+# Nothing is pushed before every package has been updated and built, so a
+# failure leaves the AUR and master untouched. A release published by hand
+# fires the release event before release.yml has uploaded the assets; the job
+# then waits up to ten minutes for the .sha256 file to appear. If the AUR
+# already carries the pkgver of every package, the job logs it and only makes
+# sure packaging/ mirrors what the AUR has.
 
 name: AUR
 
@@ -59,8 +71,13 @@ jobs:
       run:
         shell: bash
     env:
-      AUR_REPO: ssh://aur@aur.archlinux.org/frameit.git
-      BUILD_DIR: /home/builder/frameit
+      # AUR package names, in publish order. Each has its PKGBUILD, .SRCINFO
+      # and packaging LICENSE in packaging/<pkgname>/ here and its repository
+      # at $AUR_SSH/<pkgname>.git. The steps below clone that repository to
+      # $HOME/aur-<pkgname> and build the package in /home/builder/<pkgname>.
+      PACKAGES: frameit frameit-bin
+      AUR_SSH: ssh://aur@aur.archlinux.org
+      UPSTREAM: https://github.com/eggfriedrice24/frameit
     steps:
       - name: Install tooling
         # git before checkout so the action produces a real git checkout.
@@ -125,104 +142,177 @@ jobs:
           # $HOME differs from root's passwd entry, which is what ssh uses.
           echo "GIT_SSH_COMMAND=ssh -i ${ssh_dir}/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=${ssh_dir}/aur_known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
 
-      - name: Clone AUR repository and compare pkgver
+      - name: Clone AUR repositories and compare pkgver
         id: aur
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          aur_dir="$HOME/aur-frameit"
-          # A package that does not exist yet clones as an empty repository.
-          git clone "$AUR_REPO" "$aur_dir"
-          echo "AUR_DIR=${aur_dir}" >> "$GITHUB_ENV"
-          current=""
-          if [[ -f "$aur_dir/.SRCINFO" ]]; then
-            current=$(sed -n 's/^\tpkgver = //p' "$aur_dir/.SRCINFO")
-          fi
-          echo "AUR currently has pkgver '${current:-none}', releasing '${VERSION}'"
-          if [[ "$current" == "$VERSION" ]]; then
-            echo "AUR already has frameit ${VERSION}; nothing to do"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          read -ra pkgs <<<"$PACKAGES"
+          publish=()
+          for pkg in "${pkgs[@]}"; do
+            aur_dir="$HOME/aur-$pkg"
+            # A package that does not exist yet clones as an empty repository.
+            git clone "$AUR_SSH/$pkg.git" "$aur_dir"
+            current=""
+            if [[ -f "$aur_dir/.SRCINFO" ]]; then
+              current=$(sed -n 's/^\tpkgver = //p' "$aur_dir/.SRCINFO")
+            fi
+            echo "$pkg: AUR currently has pkgver '${current:-none}', releasing '$VERSION'"
+            if [[ "$current" == "$VERSION" ]]; then
+              echo "$pkg: AUR already has $VERSION; nothing to do"
+            else
+              publish+=("$pkg")
+            fi
+          done
+          # Space-separated names of the packages still to publish. Empty when
+          # the AUR is up to date, which skips every step below.
+          echo "publish=${publish[*]}" >> "$GITHUB_OUTPUT"
+          echo "publishing: ${publish[*]:-nothing}"
 
       - name: Create non-root build user
-        if: steps.aur.outputs.skip != 'true'
+        if: steps.aur.outputs.publish != ''
         # makepkg and updpkgsums refuse to run as root.
         run: useradd -m builder
 
-      - name: Update PKGBUILD and .SRCINFO
-        if: steps.aur.outputs.skip != 'true'
+      - name: Update PKGBUILDs and .SRCINFOs
+        if: steps.aur.outputs.publish != ''
         env:
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH: ${{ steps.aur.outputs.publish }}
         run: |
           set -euo pipefail
-          url="https://github.com/eggfriedrice24/frameit/archive/refs/tags/${TAG}.tar.gz"
-          b2=$(curl -fsSL "$url" | b2sum | cut -d ' ' -f 1)
-          echo "b2sum of ${url}: ${b2}"
+          read -ra pkgs <<<"$PUBLISH"
+          for pkg in "${pkgs[@]}"; do
+            echo "::group::$pkg: update PKGBUILD and .SRCINFO"
+            build="/home/builder/$pkg"
+            install -d -o builder -g builder "$build"
+            install -o builder -g builder -m 644 "packaging/$pkg/PKGBUILD" "$build/PKGBUILD"
+            sed -i \
+              -e "s/^pkgver=.*/pkgver=$VERSION/" \
+              -e "s/^pkgrel=.*/pkgrel=1/" \
+              "$build/PKGBUILD"
 
-          install -d -o builder -g builder "$BUILD_DIR"
-          install -o builder -g builder -m 644 packaging/frameit/PKGBUILD "$BUILD_DIR/PKGBUILD"
-          sed -i \
-            -e "s/^pkgver=.*/pkgver=${VERSION}/" \
-            -e "s/^pkgrel=.*/pkgrel=1/" \
-            "$BUILD_DIR/PKGBUILD"
+            # The checksum the PKGBUILD must end up with, taken from upstream
+            # independently of the download updpkgsums makes below.
+            case "$pkg" in
+              frameit)
+                # GitHub publishes no checksum for its tag tarballs, so the
+                # reference is the BLAKE2 sum of a separate download.
+                sums=b2sums
+                url="$UPSTREAM/archive/refs/tags/$TAG.tar.gz"
+                expected=$(curl -fsSL --retry 3 "$url" | b2sum | cut -d ' ' -f 1)
+                ;;
+              frameit-bin)
+                # release.yml publishes the SHA-256 of the release tarball
+                # next to it, in sha256sum format: "<hash>  <file name>".
+                sums=sha256sums_x86_64
+                asset="frameit-$VERSION-x86_64-linux.tar.gz"
+                url="$UPSTREAM/releases/download/$TAG/$asset.sha256"
+                # A release published by hand fires this workflow before
+                # release.yml has uploaded the assets, so wait for the file
+                # for a bounded time instead of failing at once.
+                line=""
+                for attempt in $(seq 1 20); do
+                  if line=$(curl -fsSL --retry 3 "$url"); then
+                    break
+                  fi
+                  if (( attempt == 20 )); then
+                    echo "::error::$pkg: $url is still missing after ten minutes; make sure the release has its assets, then re-run this workflow"
+                    exit 1
+                  fi
+                  echo "$pkg: $url not available yet (attempt $attempt of 20); waiting 30s"
+                  sleep 30
+                done
+                read -r expected name <<<"$line"
+                if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$name" != "$asset" ]]; then
+                  echo "::error::$pkg: unexpected content in $url: '$line'"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "::error::no checksum rule for package $pkg"
+                exit 1
+                ;;
+            esac
+            echo "$pkg: upstream $sums for $url: $expected"
 
-          # updpkgsums downloads the sources named in the PKGBUILD and rewrites
-          # the checksum arrays in place. The downloaded tarball stays next to
-          # the PKGBUILD, so the test build below does not fetch it again.
-          su - builder -c "cd '$BUILD_DIR' && updpkgsums"
-          if ! grep -q "$b2" "$BUILD_DIR/PKGBUILD"; then
-            echo "::error::PKGBUILD b2sums do not contain the checksum of ${url}; check the source= line"
-            exit 1
-          fi
-          su - builder -c "cd '$BUILD_DIR' && makepkg --printsrcinfo > .SRCINFO"
+            # updpkgsums downloads the sources named in the PKGBUILD and
+            # rewrites the checksum arrays in place, architecture-specific
+            # ones included. The downloaded tarball stays next to the
+            # PKGBUILD, so the test build below does not fetch it again.
+            su - builder -c "cd '$build' && updpkgsums"
+            su - builder -c "cd '$build' && makepkg --printsrcinfo > .SRCINFO"
+            actual=$(sed -n "s/^\t$sums = //p" "$build/.SRCINFO")
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::$pkg: $sums in the PKGBUILD is '$actual' but upstream publishes '$expected'; check the source line"
+              exit 1
+            fi
+            echo "::endgroup::"
 
-          echo "::group::PKGBUILD changes"
-          diff -u packaging/frameit/PKGBUILD "$BUILD_DIR/PKGBUILD" || true
-          echo "::endgroup::"
-
-      - name: Test build and namcap
-        if: steps.aur.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          su - builder -c "cd '$BUILD_DIR' && makepkg -f"
-          log=$(mktemp)
-          # The glob matches the main package and not the -debug split.
-          for target in "$BUILD_DIR/PKGBUILD" "$BUILD_DIR"/frameit-[0-9]*.pkg.tar.zst; do
-            echo "::group::namcap $target"
-            namcap "$target" | tee -a "$log"
+            echo "::group::$pkg: PKGBUILD changes"
+            diff -u "packaging/$pkg/PKGBUILD" "$build/PKGBUILD" || true
             echo "::endgroup::"
           done
-          if grep -E '^[^ ]+( \([^)]*\))? E: ' "$log"; then
-            echo "::error::namcap reported errors (warnings above are informational)"
+
+      - name: Test build and namcap
+        if: steps.aur.outputs.publish != ''
+        env:
+          PUBLISH: ${{ steps.aur.outputs.publish }}
+        run: |
+          set -euo pipefail
+          read -ra pkgs <<<"$PUBLISH"
+          log=$(mktemp)
+          for pkg in "${pkgs[@]}"; do
+            build="/home/builder/$pkg"
+            su - builder -c "cd '$build' && makepkg -f"
+            # The glob matches the main package and not a -debug split, if
+            # one was built (frameit-bin has none).
+            for target in "$build/PKGBUILD" "$build/$pkg"-[0-9]*.pkg.tar.zst; do
+              if [[ ! -f "$target" ]]; then
+                echo "::error::$pkg: $target does not exist"
+                exit 1
+              fi
+              echo "::group::namcap $target"
+              namcap "$target" | tee -a "$log"
+              echo "::endgroup::"
+            done
+          done
+          # namcap prints findings as "<name> E: ..." and its own failures to
+          # read a target as "Error: ...", always exiting 0; both must fail.
+          if grep -E '^([^ ]+( \([^)]*\))? E: |Error: )' "$log"; then
+            echo "::error::namcap reported errors or could not analyse a target (warnings above are informational)"
             exit 1
           fi
           echo "namcap reported no errors"
 
       - name: Push to AUR
-        if: steps.aur.outputs.skip != 'true'
+        if: steps.aur.outputs.publish != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH: ${{ steps.aur.outputs.publish }}
         run: |
           set -euo pipefail
-          cd "$AUR_DIR"
-          cp "$BUILD_DIR/PKGBUILD" "$BUILD_DIR/.SRCINFO" .
-          cp "$GITHUB_WORKSPACE/packaging/frameit/LICENSE" .
-          git config user.name "eggfriedrice"
-          git config user.email "eggfriedricew.g.o@gmail.com"
-          git add PKGBUILD .SRCINFO LICENSE
-          if git diff --cached --quiet; then
-            echo "AUR repository already matches; nothing to push"
-            exit 0
-          fi
-          git commit -m "upgpkg: ${VERSION}-1"
-          git push origin HEAD:master
+          read -ra pkgs <<<"$PUBLISH"
+          for pkg in "${pkgs[@]}"; do
+            build="/home/builder/$pkg"
+            aur_dir="$HOME/aur-$pkg"
+            cp "$build/PKGBUILD" "$build/.SRCINFO" "packaging/$pkg/LICENSE" "$aur_dir/"
+            git -C "$aur_dir" config user.name "eggfriedrice"
+            git -C "$aur_dir" config user.email "eggfriedricew.g.o@gmail.com"
+            git -C "$aur_dir" add PKGBUILD .SRCINFO LICENSE
+            if git -C "$aur_dir" diff --cached --quiet; then
+              echo "$pkg: AUR repository already matches; nothing to push"
+              continue
+            fi
+            git -C "$aur_dir" commit -m "upgpkg: $VERSION-1"
+            git -C "$aur_dir" push origin HEAD:master
+          done
 
       - name: Commit packaging update to master
-        if: steps.aur.outputs.skip != 'true'
+        # Runs even when nothing was published, so a re-run after a partial
+        # failure still brings packaging/ in line with what the AUR has.
         env:
           VERSION: ${{ steps.version.outputs.version }}
           # Needed by both the commit and the rebase below; a -c on the commit
@@ -234,13 +324,24 @@ jobs:
         run: |
           set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          cp "$BUILD_DIR/PKGBUILD" "$BUILD_DIR/.SRCINFO" packaging/frameit/
-          git add packaging/frameit/PKGBUILD packaging/frameit/.SRCINFO
+          read -ra pkgs <<<"$PACKAGES"
+          for pkg in "${pkgs[@]}"; do
+            # Built in this run: take the build directory. Otherwise mirror
+            # the AUR clone, which is what users actually get.
+            src="/home/builder/$pkg"
+            if [[ ! -f "$src/.SRCINFO" ]]; then
+              src="$HOME/aur-$pkg"
+            fi
+            if [[ -f "$src/PKGBUILD" && -f "$src/.SRCINFO" ]]; then
+              cp "$src/PKGBUILD" "$src/.SRCINFO" "packaging/$pkg/"
+              git add "packaging/$pkg/PKGBUILD" "packaging/$pkg/.SRCINFO"
+            fi
+          done
           if git diff --cached --quiet; then
-            echo "packaging/aur already up to date"
+            echo "packaging/ already up to date"
             exit 0
           fi
-          git commit -m "update aur packaging to ${VERSION} [skip ci]"
-          # master may have moved while the package was building.
+          git commit -m "update aur packaging to $VERSION [skip ci]"
+          # master may have moved while the packages were building.
           git pull --rebase origin master
           git push origin HEAD:master
