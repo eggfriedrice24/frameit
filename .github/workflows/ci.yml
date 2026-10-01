@@ -1,0 +1,128 @@
+# Continuous integration for frameit.
+#
+# rust:    format check, clippy, tests and a release build on ubuntu-latest.
+# makepkg: a real makepkg build of packaging/aur/PKGBUILD in an
+#          archlinux:base-devel container, against the current tree rather
+#          than a tagged tarball, followed by namcap on the PKGBUILD and the
+#          built package. namcap errors fail the job, warnings are printed.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Format, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+  makepkg:
+    name: AUR package build
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install build tooling
+        # git must be present before checkout so the action produces a real
+        # git checkout (git archive needs it) instead of a tarball download.
+        # The image's keyring may predate a packager key, so it is refreshed
+        # before the upgrade.
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed git namcap rust
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create non-root build user
+        # makepkg refuses to run as root.
+        run: useradd -m builder
+
+      - name: Stage PKGBUILD and source tarball
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          build=/home/builder/build
+          install -d -o builder -g builder "$build"
+          install -o builder -g builder -m 644 packaging/aur/PKGBUILD "$build/PKGBUILD"
+
+          # Read pkgver and the local source file name from the PKGBUILD so
+          # the tarball staged here is exactly the one makepkg will look for.
+          srcinfo=$(su - builder -c "cd '$build' && makepkg --printsrcinfo")
+          pkgver=$(sed -n 's/^\tpkgver = //p' <<<"$srcinfo")
+          source=$(sed -n 's/^\tsource = //p' <<<"$srcinfo" | head -n 1)
+          tarball=${source%%::*}
+          if [[ "$tarball" == "$source" ]]; then
+            tarball=${source##*/}
+          fi
+          if [[ -z "$pkgver" || -z "$tarball" ]]; then
+            echo "::error::could not read pkgver or source from packaging/aur/PKGBUILD"
+            exit 1
+          fi
+          echo "pkgver=$pkgver source=$tarball"
+
+          # Same top-level directory as the GitHub tag tarball
+          # (frameit-<pkgver>/). With the file already next to the PKGBUILD,
+          # makepkg uses it instead of downloading the tagged release.
+          git archive --format=tar.gz --prefix="frameit-${pkgver}/" \
+            -o "$build/$tarball" HEAD
+          chown builder:builder "$build/$tarball"
+          ls -l "$build"
+
+      - name: makepkg
+        # Checksums are skipped because the tarball comes from the working
+        # tree, not from the tagged release the PKGBUILD lists sums for.
+        run: su - builder -c 'cd ~/build && makepkg -f --skipchecksums'
+
+      - name: namcap
+        run: |
+          set -euo pipefail
+          log=$(mktemp)
+          # The glob matches the main package and not the -debug split.
+          for target in /home/builder/build/PKGBUILD /home/builder/build/frameit-[0-9]*.pkg.tar.zst; do
+            echo "::group::namcap $target"
+            namcap "$target" | tee -a "$log"
+            echo "::endgroup::"
+          done
+          if grep -E '^[^ ]+( \([^)]*\))? E: ' "$log"; then
+            echo "::error::namcap reported errors (warnings above are informational)"
+            exit 1
+          fi
+          echo "namcap reported no errors"
