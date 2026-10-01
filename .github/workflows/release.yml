@@ -49,6 +49,12 @@ jobs:
             echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${cargo_version}"
             exit 1
           fi
+          # The man page carries the version in its .TH line; keep it honest.
+          man_version=$(sed -n 's/^\.TH FRAMEIT 1 [^ ]* "frameit \([^"]*\)".*/\1/p' doc/frameit.1)
+          if [[ "$version" != "$man_version" ]]; then
+            echo "::error::doc/frameit.1 says version '${man_version}' in its .TH line, expected ${version}"
+            exit 1
+          fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "releasing frameit ${version}"
 
