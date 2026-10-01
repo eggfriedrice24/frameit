@@ -1,0 +1,15 @@
+pkgbase = frameit
+	pkgdesc = Temporary selection rectangle overlay for Wayland and Hyprland screen shares
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/eggfriedrice24/frameit
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	depends = glibc
+	depends = libgcc
+	optdepends = hyprland: register the trigger with frameit bind
+	source = frameit-0.1.0.tar.gz::https://github.com/eggfriedrice24/frameit/archive/refs/tags/v0.1.0.tar.gz
+	b2sums = SKIP
+
+pkgname = frameit
