@@ -1,0 +1,280 @@
+.\" frameit(1) manual page. Plain man(7) macros: renders with groff or mandoc,
+.\" no scdoc or pandoc needed.
+.TH FRAMEIT 1 2026-10-01 "frameit 0.1.0" "User Commands"
+.SH NAME
+frameit \- temporary selection rectangle overlay for Wayland
+.SH SYNOPSIS
+.B frameit
+.RB [ \-c | \-\-config
+.IR PATH ]
+.br
+.B frameit bind
+.RB [ \-c | \-\-config
+.IR PATH ]
+.br
+.B frameit \-\-help
+.SH DESCRIPTION
+.B frameit
+draws a temporary, translucent selection rectangle on the screen. The
+rectangle is a real compositor overlay (a layer-shell surface), so it shows up
+in screen shares through PipeWire: Discord, Google Meet, OBS, and so on.
+Nothing is captured, saved, or left on screen once the gesture ends.
+.PP
+The gesture is:
+.IP 1. 4
+Press the trigger chord, by default Super+Shift+Z. Hyprland launches
+.BR frameit .
+.IP 2. 4
+Keep holding the modifiers, press the left mouse button, and drag. The
+rectangle follows the pointer.
+.IP 3. 4
+Release the button. The rectangle disappears and
+.B frameit
+exits.
+.PP
+Drag in any direction: the rectangle is always normalised. It stays on the
+monitor where the drag started and clamps to that monitor's edges, even if the
+pointer crosses to another monitor. Colours, border width, corner radius and
+cursor shape come from the configuration file (see
+.BR CONFIGURATION ).
+.SS Cancelling
+Pressing Escape or clicking the right mouse button exits at any time, whether
+or not a drag is in progress.
+.PP
+.B frameit
+does not know which keys launched it. When it gains keyboard focus it reads
+the modifier keys (Super, Shift, Ctrl, Alt) physically held at that moment and
+treats them as the chord that launched it. If every one of those modifiers is
+released before the left button is pressed,
+.B frameit
+disarms and exits, so a trigger you did not mean leaves nothing behind. Once
+the left button is down the modifiers may be released freely.
+.PP
+With a trigger that holds no modifier at that moment, such as a bare key or a
+mouse side button like
+.BR mouse:276 ,
+there is nothing to disarm on, and
+.B frameit
+stays armed until you drag, press Escape, or right-click.
+.PP
+Only one instance runs at a time. A second
+.B frameit
+started while one is already up exits immediately and successfully.
+.SS Compositor support
+Built for Hyprland.
+.B frameit
+works on any Wayland compositor that offers the layer-shell, viewporter and
+single-pixel-buffer protocols, which covers wlroots-based compositors such as
+sway and river. The cursor-shape protocol is used when present (see
+.B cursor
+below).
+.SH COMMANDS
+Without a command,
+.B frameit
+runs the overlay.
+.TP
+.B bind
+Register the configured
+.B trigger
+chord with the running Hyprland so that it launches this executable. The chord
+is split on "+": the last part is the key, the rest are modifiers.
+.B frameit
+first tries
+.BR "hyprctl keyword bind" ;
+when Hyprland answers that the Lua API must be used instead, it falls back to
+.B hyprctl eval
+with an equivalent
+.B hl.bind
+call. The bind uses the absolute path of the running executable, so Hyprland
+does not need
+.B frameit
+on its PATH. It is a runtime bind, not part of the config file: if a config
+reload drops it, run
+.B frameit bind
+again, or start it from your Hyprland config (see
+.BR HYPRLAND ).
+.SH OPTIONS
+.TP
+.BI "\-c, \-\-config " PATH
+Read the configuration from
+.I PATH
+instead of the default location. Applies to both the overlay and
+.BR bind .
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary to standard output and exit.
+.SH CONFIGURATION
+The configuration file is optional. It is read from
+.IR $XDG_CONFIG_HOME/frameit/config.toml ,
+falling back to
+.I \(ti/.config/frameit/config.toml
+when
+.B XDG_CONFIG_HOME
+is unset, unless
+.B \-\-config
+names another file. A missing file means the defaults.
+.PP
+The format is a flat list of
+.B key = value
+lines. Comments start with
+.B #
+outside double quotes. Values may be wrapped in double quotes, which are
+stripped. An unknown key or a bad value prints a warning on standard error
+naming the file and line, and keeps the default for that key; the rest of the
+file is still applied, so a typo never leaves the tool unusable.
+.PP
+All sizes are logical pixels, so the rectangle looks the same on a scale-2
+monitor as on a scale-1 monitor.
+.TP
+.B fill
+Fill colour, as
+.B #rrggbb
+or
+.BR #rrggbbaa .
+The leading
+.B #
+is optional, and a colour without an alpha component is opaque.
+Default "#4287f540", a translucent blue.
+.TP
+.B border
+Border colour, same format as
+.BR fill .
+Default "#4287f5", an opaque blue.
+.TP
+.B border_width
+Border width, an integer from 0 to 64. Default 2.
+.TP
+.B border_radius
+Corner radius, an integer from 0 to 256; 0 gives square corners. Default 0.
+.TP
+.B cursor
+Pointer shape while
+.B frameit
+is up: one of
+.BR crosshair ,
+.B default
+or
+.B hidden
+.RB ( none
+is accepted as an alias for
+.BR hidden ).
+.B crosshair
+and
+.B default
+need the compositor's cursor-shape protocol and leave the cursor unchanged
+without it;
+.B hidden
+works everywhere. Default "crosshair".
+.TP
+.B trigger
+Key chord registered by
+.BR "frameit bind" ,
+written as modifiers and a key joined by "+", for example
+"SUPER + SHIFT + Z". The overlay itself does not read it.
+Default "SUPER + SHIFT + Z".
+.PP
+An example with every key:
+.PP
+.EX
+fill = "#4287f540"        # translucent blue
+border = "#4287f5"        # opaque blue
+border_width = 2          # logical pixels
+border_radius = 6         # logical pixels, 0 for square corners
+cursor = "crosshair"      # crosshair, default or hidden
+trigger = "SUPER + SHIFT + Z"
+.EE
+.SH HYPRLAND
+There are two ways to bind the trigger.
+.SS In your Hyprland config
+Lua, for example in
+.IR \(ti/.config/hypr/keybinds.lua :
+.PP
+.EX
+hl.bind("SUPER + SHIFT + Z", hl.dsp.exec_cmd("frameit"))
+.EE
+.PP
+Classic
+.IR hyprland.conf :
+.PP
+.EX
+bind = SUPER SHIFT, Z, exec, frameit
+.EE
+.PP
+Make sure the directory holding
+.B frameit
+is on the PATH that Hyprland sees, or use the full path in the bind.
+.SS In frameit's config
+Set
+.B trigger
+in the configuration file and have Hyprland run
+.B frameit bind
+at startup, which registers that chord through
+.BR hyprctl .
+Lua, inside your \fBhl.on("hyprland.start", ...)\fR block:
+.PP
+.EX
+hl.exec_cmd("frameit bind")
+.EE
+.PP
+Classic:
+.PP
+.EX
+exec = frameit bind
+.EE
+.SS Choosing a chord
+Any chord works, with one constraint: the modifiers you are still holding when
+you press the left mouse button must not form a mouse bind of their own.
+Hyprland evaluates mouse binds before it passes a press to any surface, and
+\fBSUPER + mouse:272\fR (Super with the left button) is the window-drag bind
+in most configs. That is why Super+Z does not work as a trigger unless window
+dragging is moved to another chord. Super+Shift with the left button is
+normally free.
+.PP
+The one trigger that cannot work is the left mouse button itself. When a
+focus-grabbing layer surface maps, Hyprland synthesises a release for every
+button currently held and then drops the real release when it arrives, so a
+tool launched on that press never sees the button go up.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/frameit/config.toml
+Configuration file; see
+.BR CONFIGURATION .
+Falls back to
+.I \(ti/.config/frameit/config.toml
+when
+.B XDG_CONFIG_HOME
+is unset.
+.TP
+.I $XDG_RUNTIME_DIR/frameit.lock
+Lock that keeps a single instance running. Falls back to the system temporary
+directory when
+.B XDG_RUNTIME_DIR
+is unset.
+.TP
+.I /usr/share/doc/frameit/examples/config.toml
+Annotated example configuration installed by the package
+.RI ( examples/config.toml
+in the source tree).
+.SH EXIT STATUS
+.TP
+.B 0
+The rectangle was shown and dismissed or cancelled, another instance was
+already running, the bind was registered, or the usage summary was printed.
+.TP
+.B 1
+Runtime error: the Wayland connection failed, the compositor lacks a required
+protocol or advertises no outputs, or
+.B hyprctl
+could not be run or refused the bind. The reason is printed on standard error.
+.TP
+.B 2
+Usage error: an unknown argument, or
+.B \-\-config
+without a path.
+.SH SEE ALSO
+.BR Hyprland (1),
+.BR hyprctl (1)
+.PP
+Project page:
+.UR https://github.com/eggfriedrice24/frameit
+.UE
