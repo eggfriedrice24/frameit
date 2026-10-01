@@ -1,0 +1,105 @@
+# Release build for frameit, triggered by pushing a tag v<version>.
+#
+# Builds the release binary, packs frameit-<version>-x86_64-linux.tar.gz with
+# the binary, LICENSE, README.md, the man page and the example config,
+# writes a .sha256 next to it, and creates the GitHub release with generated
+# notes. The version is taken from the tag (leading v stripped) and must equal
+# the version in Cargo.toml.
+#
+# A release created with GITHUB_TOKEN does not fire the "release" event for
+# other workflows, so the AUR publish (aur.yml) is dispatched explicitly as
+# the last step. That needs actions: write.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Derive version from tag and check Cargo.toml
+        id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "frameit") | .version')
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${cargo_version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "releasing frameit ${version}"
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Assemble tarball
+        id: tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="frameit-${VERSION}-x86_64-linux"
+          stage="dist/${name}"
+          install -Dm755 target/release/frameit "${stage}/frameit"
+          install -Dm644 LICENSE README.md -t "${stage}"
+          install -Dm644 doc/frameit.1 -t "${stage}/doc"
+          install -Dm644 examples/config.toml -t "${stage}/examples"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          cat "dist/${name}.tar.gz.sha256"
+          tar -tzf "dist/${name}.tar.gz"
+          echo "tarball=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TARBALL: ${{ steps.tarball.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$VERSION" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # Created by hand first (which also pushed the tag): just attach.
+            echo "release ${GITHUB_REF_NAME} already exists; uploading assets"
+            gh release upload "$GITHUB_REF_NAME" --clobber "$TARBALL" "${TARBALL}.sha256"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "frameit ${VERSION}" \
+              --generate-notes \
+              "${args[@]}" \
+              "$TARBALL" "${TARBALL}.sha256"
+          fi
+
+      - name: Trigger AUR publish
+        # Stable releases only; prerelease tags contain a hyphen.
+        if: ${{ !contains(steps.version.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run aur.yml --ref master -f "tag=${GITHUB_REF_NAME}"
