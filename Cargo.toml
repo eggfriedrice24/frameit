@@ -1,0 +1,12 @@
+[package]
+name = "frameit"
+version = "0.1.0"
+edition = "2024"
+authors = ["eggfriedrice"]
+
+
+[dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
