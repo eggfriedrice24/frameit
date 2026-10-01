@@ -1,0 +1,13 @@
+# frameit configuration. Copy to ~/.config/frameit/config.toml.
+# Every key is optional; these are the defaults except border_radius.
+# Colours are #rrggbb or #rrggbbaa.
+
+fill = "#4287f540"        # translucent blue
+border = "#4287f5"        # opaque blue
+border_width = 2          # logical pixels
+border_radius = 6         # logical pixels, 0 for square corners
+cursor = "crosshair"      # crosshair, default or hidden
+
+# Key chord registered by `frameit bind`. The modifiers you are still holding
+# when you press the left button must not form a mouse bind of their own.
+trigger = "SUPER + SHIFT + Z"
