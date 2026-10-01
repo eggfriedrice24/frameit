@@ -1,4 +1,4 @@
-# Publishes packaging/aur to the AUR package "frameit".
+# Publishes packaging/frameit to the AUR package "frameit".
 #
 # Required repository secret:
 #   AUR_SSH_PRIVATE_KEY  An SSH private key in OpenSSH format without a
@@ -18,7 +18,7 @@
 # What it does, in an archlinux:base-devel container:
 #   1. computes the BLAKE2 checksum of the GitHub tag tarball for the release,
 #   2. sets pkgver (tag without v), pkgrel=1 and b2sums in
-#      packaging/aur/PKGBUILD and regenerates .SRCINFO,
+#      packaging/frameit/PKGBUILD and regenerates .SRCINFO,
 #   3. test builds the package with makepkg (checksums verified) and namcap,
 #   4. pushes PKGBUILD, .SRCINFO and the packaging LICENSE to
 #      ssh://aur@aur.archlinux.org/frameit.git with the commit
@@ -164,7 +164,7 @@ jobs:
           echo "b2sum of ${url}: ${b2}"
 
           install -d -o builder -g builder "$BUILD_DIR"
-          install -o builder -g builder -m 644 packaging/aur/PKGBUILD "$BUILD_DIR/PKGBUILD"
+          install -o builder -g builder -m 644 packaging/frameit/PKGBUILD "$BUILD_DIR/PKGBUILD"
           sed -i \
             -e "s/^pkgver=.*/pkgver=${VERSION}/" \
             -e "s/^pkgrel=.*/pkgrel=1/" \
@@ -181,7 +181,7 @@ jobs:
           su - builder -c "cd '$BUILD_DIR' && makepkg --printsrcinfo > .SRCINFO"
 
           echo "::group::PKGBUILD changes"
-          diff -u packaging/aur/PKGBUILD "$BUILD_DIR/PKGBUILD" || true
+          diff -u packaging/frameit/PKGBUILD "$BUILD_DIR/PKGBUILD" || true
           echo "::endgroup::"
 
       - name: Test build and namcap
@@ -210,7 +210,7 @@ jobs:
           set -euo pipefail
           cd "$AUR_DIR"
           cp "$BUILD_DIR/PKGBUILD" "$BUILD_DIR/.SRCINFO" .
-          cp "$GITHUB_WORKSPACE/packaging/aur/LICENSE" .
+          cp "$GITHUB_WORKSPACE/packaging/frameit/LICENSE" .
           git config user.name "eggfriedrice"
           git config user.email "eggfriedricew.g.o@gmail.com"
           git add PKGBUILD .SRCINFO LICENSE
@@ -234,8 +234,8 @@ jobs:
         run: |
           set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          cp "$BUILD_DIR/PKGBUILD" "$BUILD_DIR/.SRCINFO" packaging/aur/
-          git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
+          cp "$BUILD_DIR/PKGBUILD" "$BUILD_DIR/.SRCINFO" packaging/frameit/
+          git add packaging/frameit/PKGBUILD packaging/frameit/.SRCINFO
           if git diff --cached --quiet; then
             echo "packaging/aur already up to date"
             exit 0

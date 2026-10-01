@@ -1,7 +1,7 @@
 /target
 
-# makepkg and updpkgsums artifacts when working inside packaging/aur
-/packaging/aur/*.tar.gz
-/packaging/aur/*.pkg.tar*
-/packaging/aur/src/
-/packaging/aur/pkg/
+# makepkg and updpkgsums artifacts when working inside a packaging directory
+/packaging/*/*.tar.gz
+/packaging/*/*.pkg.tar*
+/packaging/*/src/
+/packaging/*/pkg/

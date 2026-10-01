@@ -1,7 +1,7 @@
 # Continuous integration for frameit.
 #
 # rust:    format check, clippy, tests and a release build on ubuntu-latest.
-# makepkg: a real makepkg build of packaging/aur/PKGBUILD in an
+# makepkg: a real makepkg build of packaging/frameit/PKGBUILD in an
 #          archlinux:base-devel container, against the current tree rather
 #          than a tagged tarball, followed by namcap on the PKGBUILD and the
 #          built package. namcap errors fail the job, warnings are printed.
@@ -81,7 +81,7 @@ jobs:
 
           build=/home/builder/build
           install -d -o builder -g builder "$build"
-          install -o builder -g builder -m 644 packaging/aur/PKGBUILD "$build/PKGBUILD"
+          install -o builder -g builder -m 644 packaging/frameit/PKGBUILD "$build/PKGBUILD"
 
           # Read pkgver and the local source file name from the PKGBUILD so
           # the tarball staged here is exactly the one makepkg will look for.
@@ -93,7 +93,7 @@ jobs:
             tarball=${source##*/}
           fi
           if [[ -z "$pkgver" || -z "$tarball" ]]; then
-            echo "::error::could not read pkgver or source from packaging/aur/PKGBUILD"
+            echo "::error::could not read pkgver or source from packaging/frameit/PKGBUILD"
             exit 1
           fi
           echo "pkgver=$pkgver source=$tarball"
