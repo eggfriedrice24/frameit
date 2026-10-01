@@ -220,7 +220,11 @@ impl Overlay {
             (x0, y1 - ce, 0, crop),
             (x1 - ce, y1 - ce, crop, crop),
         ];
-        for (pane, (buffer, (x, y, sx, sy))) in self.corner.iter().zip(g.corners.buffers.iter().zip(corners)) {
+        for (pane, (buffer, (x, y, sx, sy))) in self
+            .corner
+            .iter()
+            .zip(g.corners.buffers.iter().zip(corners))
+        {
             pane.show_corner(buffer, x, y, ce, sx, sy);
         }
 
@@ -285,7 +289,10 @@ impl Dispatch<WlCallback, ()> for State {
         qh: &QueueHandle<State>,
     ) {
         // The only callbacks we create are frame callbacks; match it to its overlay.
-        let overlay = state.overlays.iter().position(|o| o.frame_callback.as_ref() == Some(callback));
+        let overlay = state
+            .overlays
+            .iter()
+            .position(|o| o.frame_callback.as_ref() == Some(callback));
         if let Some(i) = overlay {
             let g = &state.globals;
             state.overlays[i].frame_done(g, qh);

@@ -32,7 +32,11 @@ pub struct Corners {
 }
 
 impl Corners {
-    pub fn new(shm: &WlShm, config: &Config, qh: &QueueHandle<State>) -> Result<Corners, Box<dyn Error>> {
+    pub fn new(
+        shm: &WlShm,
+        config: &Config,
+        qh: &QueueHandle<State>,
+    ) -> Result<Corners, Box<dyn Error>> {
         let size = config.border_radius.max(config.border_width).max(1);
         let px = size * OVERSAMPLE;
         let stride = px * 4;
@@ -132,15 +136,27 @@ mod tests {
     fn rounded_corner_has_transparent_tip_border_edge_and_fill_inside() {
         let px = 6 * OVERSAMPLE;
         let data = render_top_left(px, &config(6, 2));
-        assert_eq!(pixel(&data, px, 0, 0)[3], 0, "tip outside the arc is transparent");
+        assert_eq!(
+            pixel(&data, px, 0, 0)[3],
+            0,
+            "tip outside the arc is transparent"
+        );
         // Where the arc meets the straight edge the last pixel is a hair short
         // of fully covered, so accept near-opaque border there.
         for (x, y) in [(px - 1, 0), (0, px - 1)] {
             let [b, _, r, a] = pixel(&data, px, x, y);
-            assert!(r >= 250 && a >= 250 && b == 0, "edge at ({x}, {y}) is border: {:?}", [b, r, a]);
+            assert!(
+                r >= 250 && a >= 250 && b == 0,
+                "edge at ({x}, {y}) is border: {:?}",
+                [b, r, a]
+            );
         }
         // Premultiplied half-alpha blue: B = 128, A = 128.
-        assert_eq!(pixel(&data, px, px - 1, px - 1), [128, 0, 0, 128], "inside is fill");
+        assert_eq!(
+            pixel(&data, px, px - 1, px - 1),
+            [128, 0, 0, 128],
+            "inside is fill"
+        );
         // Something on the arc is partially covered.
         let partial = (0..px).any(|i| matches!(pixel(&data, px, i, px - 1 - i)[3], 1..=254));
         assert!(partial, "arc is anti-aliased");

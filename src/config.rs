@@ -124,7 +124,9 @@ fn parse_color(value: &str) -> Result<Rgba, String> {
     let hex = value.trim_start_matches('#');
     let valid = (hex.len() == 6 || hex.len() == 8) && hex.chars().all(|c| c.is_ascii_hexdigit());
     if !valid {
-        return Err(format!("expected a colour like #rrggbb or #rrggbbaa, got '{value}'"));
+        return Err(format!(
+            "expected a colour like #rrggbb or #rrggbbaa, got '{value}'"
+        ));
     }
     let channel = |i: usize| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)) / 255.0;
     let alpha = if hex.len() == 8 { channel(6) } else { 1.0 };
@@ -144,7 +146,9 @@ fn parse_cursor(value: &str) -> Result<Cursor, String> {
         "crosshair" => Ok(Cursor::Crosshair),
         "default" => Ok(Cursor::Default),
         "hidden" | "none" => Ok(Cursor::Hidden),
-        _ => Err(format!("expected crosshair, default or hidden, got '{value}'")),
+        _ => Err(format!(
+            "expected crosshair, default or hidden, got '{value}'"
+        )),
     }
 }
 
@@ -162,7 +166,10 @@ mod tests {
 
     #[test]
     fn comments_are_stripped_but_not_inside_quotes() {
-        assert_eq!(strip_comment("border = \"#4287f5\" # blue"), "border = \"#4287f5\" ");
+        assert_eq!(
+            strip_comment("border = \"#4287f5\" # blue"),
+            "border = \"#4287f5\" "
+        );
         assert_eq!(strip_comment("# whole line"), "");
         assert_eq!(unquote("\"x\""), "x");
         assert_eq!(unquote("2"), "2");

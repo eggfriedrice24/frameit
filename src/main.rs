@@ -132,7 +132,9 @@ impl State {
     /// overlay mapped wherever the cursor is, and keeps it there until the
     /// mouse moves.
     fn start_drag(&mut self, qh: &QueueHandle<State>) {
-        let Some(anchor) = self.global_pos() else { return };
+        let Some(anchor) = self.global_pos() else {
+            return;
+        };
         let on = self.overlays.iter().position(|o| o.contains(anchor));
         self.drag = Some((on.or(self.hover).unwrap_or(0), anchor));
         self.update_drag(qh);
@@ -195,7 +197,11 @@ fn main() {
 /// binary. Tries the classic config keyword first and falls back to the Lua
 /// API, which is what a Lua-configured Hyprland asks for.
 fn register_bind(trigger: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let keys: Vec<&str> = trigger.split('+').map(str::trim).filter(|k| !k.is_empty()).collect();
+    let keys: Vec<&str> = trigger
+        .split('+')
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .collect();
     let Some((key, mods)) = keys.split_last() else {
         return Err("trigger is empty".into());
     };
@@ -210,7 +216,11 @@ fn register_bind(trigger: &str) -> Result<(), Box<dyn std::error::Error>> {
     let classic = format!("{}, {}, exec, {}", mods.join(" "), key, exe);
     let mut reply = hyprctl(&["keyword", "bind", &classic])?;
     if reply.contains("Use eval") {
-        let lua = format!("hl.bind(\"{}\", hl.dsp.exec_cmd(\"{}\"))", keys.join(" + "), exe);
+        let lua = format!(
+            "hl.bind(\"{}\", hl.dsp.exec_cmd(\"{}\"))",
+            keys.join(" + "),
+            exe
+        );
         reply = hyprctl(&["eval", &lua])?;
     }
     if reply != "ok" {
@@ -329,7 +339,10 @@ impl Dispatch<WlSeat, ()> for State {
         _: &Connection,
         qh: &QueueHandle<State>,
     ) {
-        let wl_seat::Event::Capabilities { capabilities: WEnum::Value(caps) } = event else {
+        let wl_seat::Event::Capabilities {
+            capabilities: WEnum::Value(caps),
+        } = event
+        else {
             return;
         };
         if caps.contains(wl_seat::Capability::Pointer) && state.pointer.is_none() {
