@@ -1,10 +1,18 @@
 # Continuous integration for frameit.
 #
-# rust:    format check, clippy, tests and a release build on ubuntu-latest.
-# makepkg: a real makepkg build of packaging/frameit/PKGBUILD in an
-#          archlinux:base-devel container, against the current tree rather
-#          than a tagged tarball, followed by namcap on the PKGBUILD and the
-#          built package. namcap errors fail the job, warnings are printed.
+# rust:        format check, clippy, tests and a release build on
+#              ubuntu-latest.
+# makepkg:     a real makepkg build of packaging/frameit/PKGBUILD in an
+#              archlinux:base-devel container, against the current tree rather
+#              than a tagged tarball, followed by namcap on the PKGBUILD and
+#              the built package. namcap errors fail the job, warnings are
+#              printed.
+# makepkg-bin: packaging/frameit-bin/PKGBUILD as committed, in the same
+#              container: the committed .SRCINFO must equal what makepkg
+#              generates from the PKGBUILD, sha256sums_x86_64 must equal the
+#              checksum upstream publishes next to the release asset, then
+#              makepkg downloads the release tarball of the committed pkgver
+#              (checksum verified) and namcap runs with the same policy.
 
 name: CI
 
@@ -98,6 +106,13 @@ jobs:
           fi
           echo "pkgver=$pkgver source=$tarball"
 
+          # The AUR reads metadata from .SRCINFO, so the committed file must be
+          # exactly what makepkg generates from the committed PKGBUILD.
+          if ! diff -u packaging/frameit/.SRCINFO <(printf '%s\n' "$srcinfo"); then
+            echo "::error::packaging/frameit/.SRCINFO does not match its PKGBUILD; regenerate it with makepkg --printsrcinfo > .SRCINFO"
+            exit 1
+          fi
+
           # Same top-level directory as the GitHub tag tarball
           # (frameit-<pkgver>/). With the file already next to the PKGBUILD,
           # makepkg uses it instead of downloading the tagged release.
@@ -121,8 +136,103 @@ jobs:
             namcap "$target" | tee -a "$log"
             echo "::endgroup::"
           done
-          if grep -E '^[^ ]+( \([^)]*\))? E: ' "$log"; then
-            echo "::error::namcap reported errors (warnings above are informational)"
+          # namcap prints findings as "<name> E: ..." and its own failures to
+          # read a target as "Error: ...", always exiting 0; both must fail.
+          if grep -E '^([^ ]+( \([^)]*\))? E: |Error: )' "$log"; then
+            echo "::error::namcap reported errors or could not analyse a target (warnings above are informational)"
+            exit 1
+          fi
+          echo "namcap reported no errors"
+
+  makepkg-bin:
+    name: AUR bin package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install build tooling
+        # Same as the makepkg job, without rust: the package installs the
+        # prebuilt binary from the release tarball.
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm --needed git namcap
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create non-root build user
+        # makepkg refuses to run as root.
+        run: useradd -m builder
+
+      - name: Check .SRCINFO against the PKGBUILD
+        # The AUR reads package metadata from .SRCINFO, so the committed file
+        # must be exactly what makepkg generates from the committed PKGBUILD.
+        run: |
+          set -euo pipefail
+          build=/home/builder/build
+          install -d -o builder -g builder "$build"
+          install -o builder -g builder -m 644 packaging/frameit-bin/PKGBUILD "$build/PKGBUILD"
+          su - builder -c "cd '$build' && makepkg --printsrcinfo" > "$build/SRCINFO.generated"
+          if ! diff -u packaging/frameit-bin/.SRCINFO "$build/SRCINFO.generated"; then
+            echo "::error::packaging/frameit-bin/.SRCINFO does not match its PKGBUILD; regenerate it with makepkg --printsrcinfo > .SRCINFO"
+            exit 1
+          fi
+          echo ".SRCINFO matches the PKGBUILD"
+
+      - name: Check the checksum against the published .sha256
+        # makepkg only proves that the download matches the PKGBUILD. The
+        # value in the PKGBUILD must also be the one upstream publishes in
+        # the .sha256 file next to the release asset (sha256sum format,
+        # "<hash>  <file name>").
+        run: |
+          set -euo pipefail
+          srcinfo=packaging/frameit-bin/.SRCINFO
+          source=$(sed -n 's/^\tsource_x86_64 = //p' "$srcinfo")
+          sum=$(sed -n 's/^\tsha256sums_x86_64 = //p' "$srcinfo")
+          if [[ -z "$source" || -z "$sum" || "$source" == *$'\n'* ]]; then
+            echo "::error::expected exactly one source_x86_64 and sha256sums_x86_64 entry in $srcinfo"
+            exit 1
+          fi
+          url=${source#*::}
+          asset=${url##*/}
+          if ! line=$(curl -fsSL --retry 3 "$url.sha256"); then
+            echo "::error::could not download $url.sha256; the GitHub release for the pkgver in packaging/frameit-bin/PKGBUILD must exist with its .sha256 asset"
+            exit 1
+          fi
+          read -r published name <<<"$line"
+          if [[ "$name" != "$asset" || "$published" != "$sum" ]]; then
+            echo "::error::sha256sums_x86_64 is '$sum' but $url.sha256 says '$line'"
+            exit 1
+          fi
+          echo "sha256sums_x86_64 matches $url.sha256"
+
+      - name: makepkg
+        # Downloads the release tarball for the pkgver in the PKGBUILD;
+        # makepkg verifies it against sha256sums_x86_64.
+        run: su - builder -c 'cd ~/build && makepkg -f'
+
+      - name: namcap
+        run: |
+          set -euo pipefail
+          log=$(mktemp)
+          # The glob matches the main package and not a -debug split, if one
+          # was built.
+          for target in /home/builder/build/PKGBUILD /home/builder/build/frameit-bin-[0-9]*.pkg.tar.zst; do
+            if [[ ! -f "$target" ]]; then
+              echo "::error::$target does not exist"
+              exit 1
+            fi
+            echo "::group::namcap $target"
+            namcap "$target" | tee -a "$log"
+            echo "::endgroup::"
+          done
+          # namcap prints findings as "<name> E: ..." and its own failures to
+          # read a target as "Error: ...", always exiting 0; both must fail.
+          if grep -E '^([^ ]+( \([^)]*\))? E: |Error: )' "$log"; then
+            echo "::error::namcap reported errors or could not analyse a target (warnings above are informational)"
             exit 1
           fi
           echo "namcap reported no errors"
