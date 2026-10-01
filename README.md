@@ -16,7 +16,8 @@ such as sway and river.
 Arch Linux, from the AUR:
 
 ```sh
-paru -S frameit
+paru -S frameit      # built from source
+paru -S frameit-bin  # prebuilt binary from the GitHub release
 ```
 
 From source, with a Rust toolchain:
