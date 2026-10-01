@@ -101,10 +101,18 @@ default, so a typo never leaves you without the tool. See
 | `border_radius` | `0` | Corner radius in logical pixels, 0 to 256 |
 | `cursor` | `"crosshair"` | `crosshair`, `default`, or `hidden` |
 | `trigger` | `"SUPER + SHIFT + Z"` | Chord registered by `frameit bind` |
+| `include` | none | Another file to read at that line, relative to this one |
 
 Sizes are logical pixels, so the rectangle looks the same on a scale-2
 monitor as on a scale-1 one. A different file can be given with
 `frameit --config PATH`.
+
+`include` is how a theme plugs in: the theme file carries `fill` and
+`border`, your own file includes it and keeps the rest. Keys after the
+include line win over it, so a colour can still be overridden locally. A
+leading `~/` expands to your home directory. The
+[eggfriedrice](https://github.com/eggfriedrice24/eggfriedrice.nvim) palette
+ships one under `extras/frameit/`.
 
 ## Usage
 

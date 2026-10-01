@@ -2,10 +2,18 @@
 //! `$XDG_CONFIG_HOME/frameit/config.toml`.
 //!
 //! Every key has a default and a bad value only costs a warning on stderr, so
-//! a typo never leaves the tool unusable. Parsed by hand: six keys do not
+//! a typo never leaves the tool unusable. Parsed by hand: seven keys do not
 //! justify a TOML dependency.
+//!
+//! `include = "path"` reads another file at that line, so a theme can ship
+//! the colours while the user's own file keeps the rest. Keys after the
+//! include win over it.
 
 use std::path::{Path, PathBuf};
+
+/// How deep `include` may nest before it is refused, which also stops a
+/// file that includes itself.
+const MAX_INCLUDE_DEPTH: usize = 8;
 
 /// Straight (non-premultiplied) RGBA in 0..=1.
 pub type Rgba = [f64; 4];
@@ -60,29 +68,56 @@ impl Config {
     /// Load `path`. A missing file is the default config. A present file with
     /// bad lines keeps the defaults for those keys and warns about each one.
     pub fn load(path: &Path) -> Config {
+        let mut config = Config::default();
+        config.apply_file(path, 0, true);
+        config
+    }
+
+    /// Apply the lines of `path` on top of `self`. A missing root file is
+    /// silent, since the config is optional; a missing include is an error
+    /// on the line that named it.
+    fn apply_file(&mut self, path: &Path, depth: usize, root: bool) {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Config::default(),
+            Err(e) if root && e.kind() == std::io::ErrorKind::NotFound => return,
             Err(e) => {
                 eprintln!("frameit: cannot read {}: {e}", path.display());
-                return Config::default();
+                return;
             }
         };
-        let mut config = Config::default();
         for (index, line) in text.lines().enumerate() {
             let line = strip_comment(line).trim();
             if line.is_empty() {
                 continue;
             }
             let result = match line.split_once('=') {
-                Some((key, value)) => config.set(key.trim(), unquote(value.trim())),
+                Some((key, value)) => match key.trim() {
+                    "include" => self.include(path, unquote(value.trim()), depth),
+                    key => self.set(key, unquote(value.trim())),
+                },
                 None => Err("expected `key = value`".to_string()),
             };
             if let Err(message) = result {
                 eprintln!("frameit: {}:{}: {message}", path.display(), index + 1);
             }
         }
-        config
+    }
+
+    /// Read another file in place of this line. A relative path resolves
+    /// against the including file's directory and a leading `~/` against
+    /// `$HOME`.
+    fn include(&mut self, from: &Path, value: &str, depth: usize) -> Result<(), String> {
+        if depth >= MAX_INCLUDE_DEPTH {
+            return Err(format!(
+                "include nested deeper than {MAX_INCLUDE_DEPTH} files"
+            ));
+        }
+        let target = resolve(from, value);
+        if !target.is_file() {
+            return Err(format!("include '{}' is not a file", target.display()));
+        }
+        self.apply_file(&target, depth + 1, false);
+        Ok(())
     }
 
     fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
@@ -96,6 +131,21 @@ impl Config {
             _ => return Err(format!("unknown key '{key}'")),
         }
         Ok(())
+    }
+}
+
+/// Path named by an `include` line, resolved from the including file.
+fn resolve(from: &Path, value: &str) -> PathBuf {
+    if let Some(rest) = value.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    let path = Path::new(value);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        from.parent().unwrap_or(Path::new(".")).join(path)
     }
 }
 
@@ -181,6 +231,66 @@ mod tests {
         assert!(parse_int("65", 0, 64).is_err());
         assert!(parse_int("-1", 0, 64).is_err());
         assert!(parse_int("two", 0, 64).is_err());
+    }
+
+    /// A scratch directory unique to one test, under the system temp dir.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("frameit-test-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn include_reads_the_other_file_and_later_keys_win() {
+        let dir = scratch("include");
+        std::fs::write(
+            dir.join("theme.toml"),
+            "border = \"#ff0000\"\nborder_width = 4\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            "border_width = 1\ninclude = \"theme.toml\"\nborder_width = 3\n",
+        )
+        .unwrap();
+        let config = Config::load(&dir.join("config.toml"));
+        assert_eq!(
+            config.border,
+            [1.0, 0.0, 0.0, 1.0],
+            "included colour applies"
+        );
+        assert_eq!(
+            config.border_width, 3,
+            "a key after the include wins over it"
+        );
+    }
+
+    #[test]
+    fn missing_include_keeps_going() {
+        let dir = scratch("missing");
+        std::fs::write(
+            dir.join("config.toml"),
+            "include = \"nope.toml\"\nborder_radius = 9\n",
+        )
+        .unwrap();
+        let config = Config::load(&dir.join("config.toml"));
+        assert_eq!(
+            config.border_radius, 9,
+            "the rest of the file still applies"
+        );
+        assert_eq!(config.border, Config::default().border);
+    }
+
+    #[test]
+    fn self_include_stops_at_the_depth_limit() {
+        let dir = scratch("loop");
+        std::fs::write(
+            dir.join("config.toml"),
+            "include = \"config.toml\"\ncursor = \"hidden\"\n",
+        )
+        .unwrap();
+        let config = Config::load(&dir.join("config.toml"));
+        assert_eq!(config.cursor, Cursor::Hidden);
     }
 
     #[test]

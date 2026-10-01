@@ -166,6 +166,20 @@ without it;
 .B hidden
 works everywhere. Default "crosshair".
 .TP
+.B include
+Another configuration file to read at this line, in the same format. A
+relative path resolves against the directory of the file that names it, and
+a leading
+.B \(ti/
+expands to the home directory. Keys after the
+.B include
+line win over the included ones, and an include that nests deeper than eight
+files is refused. This is how a theme supplies
+.B fill
+and
+.B border
+while the user's file keeps the rest.
+.TP
 .B trigger
 Key chord registered by
 .BR "frameit bind" ,

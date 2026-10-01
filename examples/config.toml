@@ -2,6 +2,9 @@
 # Every key is optional; these are the defaults except border_radius.
 # Colours are #rrggbb or #rrggbbaa.
 
+# A theme file read at this point; keys below it win. For example:
+# include = "~/p/eggfriedrice.nvim/extras/frameit/eggfriedrice.toml"
+
 fill = "#4287f540"        # translucent blue
 border = "#4287f5"        # opaque blue
 border_width = 2          # logical pixels
