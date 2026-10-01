@@ -455,8 +455,10 @@ impl Dispatch<WlKeyboard, ()> for State {
             // zero mask while moving focus between our overlays.)
             Event::Enter { keys, .. } => {
                 state.trigger_keys = keys
-                    .chunks_exact(4)
-                    .map(|b| u32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|bytes| u32::from_ne_bytes(*bytes))
                     .filter(|key| MODIFIER_KEYS.contains(key))
                     .collect();
                 state.armed |= !state.trigger_keys.is_empty();
