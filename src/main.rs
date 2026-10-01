@@ -65,6 +65,7 @@ keys that launched frameit before dragging exits as well.
 
   bind          Register the configured trigger with Hyprland via hyprctl.
   -c, --config  Config file; default $XDG_CONFIG_HOME/frameit/config.toml.
+  -V, --version Print the version and exit.
 
 Config keys: fill, border, border_width, border_radius, cursor, trigger,\ninclude.";
 
@@ -170,6 +171,10 @@ fn main() {
             },
             "-h" | "--help" => {
                 println!("{USAGE}");
+                return;
+            }
+            "-V" | "--version" => {
+                println!("frameit {}", env!("CARGO_PKG_VERSION"));
                 return;
             }
             other => {

@@ -1,6 +1,6 @@
 .\" frameit(1) manual page. Plain man(7) macros: renders with groff or mandoc,
 .\" no scdoc or pandoc needed.
-.TH FRAMEIT 1 2026-10-01 "frameit 0.1.0" "User Commands"
+.TH FRAMEIT 1 2026-10-01 "frameit 0.2.0" "User Commands"
 .SH NAME
 frameit \- temporary selection rectangle overlay for Wayland
 .SH SYNOPSIS
@@ -13,6 +13,8 @@ frameit \- temporary selection rectangle overlay for Wayland
 .IR PATH ]
 .br
 .B frameit \-\-help
+.br
+.B frameit \-\-version
 .SH DESCRIPTION
 .B frameit
 draws a temporary, translucent selection rectangle on the screen. The
@@ -103,6 +105,9 @@ instead of the default location. Applies to both the overlay and
 .TP
 .BR \-h ", " \-\-help
 Print a usage summary to standard output and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit.
 .SH CONFIGURATION
 The configuration file is optional. It is read from
 .IR $XDG_CONFIG_HOME/frameit/config.toml ,
